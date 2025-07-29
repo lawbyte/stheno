@@ -2,20 +2,30 @@ plugins {
   id 'application'
   id 'org.openjfx.javafxplugin' version '0.1.0'
   id 'org.beryx.jlink' version '2.26.0'
+  id 'java'
 }
 
 repositories {
   mavenCentral()
 }
 
+// Set Java compatibility to 17
+java {
+  sourceCompatibility = JavaVersion.VERSION_17
+  targetCompatibility = JavaVersion.VERSION_17
+}
+
+// Configure the application plugin to handle JavaFX properly
+application {
+  mainClass = 'org.medusa.intentmonitor.MainScreen'
+  applicationDefaultJvmArgs = [
+    '--add-modules', 'javafx.controls,javafx.fxml,javafx.web'
+  ]
+}
+
 javafx {
   version = "21"
   modules = ['javafx.controls', 'javafx.fxml', 'javafx.web']
-}
-
-application {
-  mainModule = 'org.medusa.intentmonitor'
-  mainClass = 'org.medusa.intentmonitor.MainScreen'
 }
 
 description = 'Stheno: A tool for analyzing and manipulating intents in Android applications'
@@ -54,4 +64,45 @@ jlink {
 }
 dependencies {
   implementation 'org.json:json:20240303'
+}
+
+// Create an executable JAR with all dependencies
+jar {
+  manifest {
+    attributes(
+      'Main-Class': 'org.medusa.intentmonitor.MainScreen'
+    )
+  }
+  from {
+    configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+  }
+  duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// Alternative: Create a fat JAR using shadow plugin approach
+task fatJar(type: Jar) {
+  manifest {
+    attributes 'Main-Class': 'org.medusa.intentmonitor.MainScreen'
+  }
+  archiveClassifier = 'fat'
+  from sourceSets.main.output
+  dependsOn configurations.runtimeClasspath
+  from {
+    configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }.collect { zipTree(it) }
+  }
+  duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// Create a runnable JAR with JavaFX launcher
+task runnableJar(type: Jar) {
+  manifest {
+    attributes 'Main-Class': 'org.medusa.intentmonitor.MainScreen'
+  }
+  archiveClassifier = 'runnable'
+  from sourceSets.main.output
+  dependsOn configurations.runtimeClasspath
+  from {
+    configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }.collect { zipTree(it) }
+  }
+  duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
