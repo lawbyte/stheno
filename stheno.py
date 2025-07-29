@@ -6,7 +6,8 @@ import socket
 import os
 import argparse
 from colorama import init, Fore, Style
-import time 
+import time
+from lamda.client import * 
 
 logo ="""
  ░▒▓███████▓▒░▒▓████████▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓████████▓▒░▒▓███████▓▒░ ░▒▓██████▓▒░  
@@ -142,10 +143,10 @@ class Stheno():
         except Exception as e:
             logger.error(f"Error stoping server: {e}")     
 
-    def run(self, target_package: str, force: bool, host="localhost", port=1711) -> None:
+    def run(self, target_package: str, force: bool, host="localhost", port=1711, remote_host=None, remote_port=None) -> None:
         print(logo)
         self.start_server(host, port)
-        self.load_device()
+        self.load_device(remote_host, remote_port)
         logger.info("We are ready to go... make sure that the monitor is running!")
         self.run_frida(force, target_package, self.device)
 
@@ -160,14 +161,30 @@ class Stheno():
         logger.info("Session is over")
         self.detached = True
 
-    def load_device(self) -> None:
+    def load_device(self, remote_host=None, remote_port=None) -> None:
         try:
-            devices = frida.enumerate_devices()
-            logger.info("Available devices:")
-            for device in range(len(devices)):
-                print(f'{device}) {devices[device]}')
-            self.device = devices[int(Numeric('\nEnter the index of the device to use:', lbound=0, ubound=len(devices) - 1).ask())]
-            logger.info(f"Device: {self.device}")
+            if remote_host and remote_port:
+                # Connect to remote Frida server with token authentication
+                if remote_port == '65000':
+                    # Use custom Device class for token authentication
+                    d = Device(remote_host)
+                    token = d._get_session_token()
+                    self.device = frida.get_device_manager() \
+                        .add_remote_device(f'{remote_host}:{remote_port}', token=token)
+                    logger.info(f"Connected to remote device: {self.device} with token authentication")
+                else:
+                    # Regular remote connection without token
+                    self.device = frida.get_device_manager() \
+                        .add_remote_device(f'{remote_host}:{remote_port}')
+                    logger.info(f"Connected to remote device: {self.device}")
+            else:
+                # Use local device enumeration
+                devices = frida.enumerate_devices()
+                logger.info("Available devices:")
+                for device in range(len(devices)):
+                    print(f'{device}) {devices[device]}')
+                self.device = devices[int(Numeric('\nEnter the index of the device to use:', lbound=0, ubound=len(devices) - 1).ask())]
+                logger.info(f"Device: {self.device}")
         except Exception as e:
               logger.error(e)
     
@@ -196,30 +213,61 @@ class Stheno():
           
     def frida_session_handler(self, force: bool, con_device, pkg: str, pid=-1):
         time.sleep(1)
-        if not force:
-            if pid == -1:
-                logger.info(con_device.id)
-                self.pid = os.popen(f"adb -s {con_device.id} shell pidof {pkg}").read().strip()
+        try:
+            if not force:
+                if pid == -1:
+                    logger.info(f"Device ID: {con_device.id}")
+                    # Check if this is a remote device (not USB/local)
+                    if hasattr(con_device, 'type') and con_device.type in ['remote', 'tether']:
+                        # For remote devices, try to find the process using Frida's enumerate_processes
+                        processes = con_device.enumerate_processes()
+                        logger.info(f"Available processes on remote device:")
+                        for process in processes:
+                            logger.info(f"  PID: {process.pid}, Name: {process.name}")
+                        
+                        target_pid = None
+                        for process in processes:
+                            if pkg in process.name:
+                                target_pid = process.pid
+                                logger.info(f"Found target process: {process.name} (PID: {process.pid})")
+                                break
+                        if target_pid:
+                            self.pid = target_pid
+                        else:
+                            logger.error(f"Could not find process with name containing '{pkg}'")
+                            logger.info(f"Available processes: {[p.name for p in processes]}")
+                            return None
+                    else:
+                        # For USB/local devices, use ADB
+                        self.pid = os.popen(f"adb -s {con_device.id} shell pidof {pkg}").read().strip()
+                else:
+                    self.pid = pid
+                
+                if self.pid == '' or self.pid is None:
+                    logger.error("Could not find process with this name.")
+                    return None
+                
+                frida_session = con_device.attach(int(self.pid))
+                if frida_session:
+                    logger.info("Attaching frida session to PID - {0}".format(frida_session._impl.pid))
+                else:
+                    logger.error("Could not attach the requested process")
+                    return None
+            elif force:
+                self.pid = con_device.spawn(pkg)
+                if self.pid:
+                    frida_session = con_device.attach(self.pid)
+                    logger.info("Spawned package : {0} on pid {1}".format(pkg, frida_session._impl.pid))
+                else:
+                    logger.error("Could not spawn the requested package")
+                    return None
             else:
-                self.pid = pid
-            if self.pid == '':
-                logger.error("Could not find process with this name.")
                 return None
-            frida_session = con_device.attach(int(self.pid))
-            if frida_session:
-                logger.info("Attaching frida session to PID - {0}".format(frida_session._impl.pid))
-            else:
-                logger.error("Could not attach the requested process")
-        elif force:
-            self.pid = con_device.spawn(pkg)
-            if self.pid:
-                frida_session = con_device.attach(self.pid)
-                logger.info("Spawned package : {0} on pid {1}".format(pkg, frida_session._impl.pid))
-            else:
-                logger.error("Could not spawn the requested package")
-                return None
-            
-        return frida_session
+                
+            return frida_session
+        except Exception as e:
+            logger.error(f"Error in frida_session_handler: {e}")
+            return None
 
 def setup_logging():
     formatter = LoggerConsoleOutputFormat()
@@ -236,11 +284,13 @@ if __name__=="__main__":
     parser.add_argument('-a', '--address', type=str, default="localhost", help='address to listen to (default is localhost)')
     parser.add_argument('-p', '--port', type=str, default=1711, help='port to listen to (default is 1711)')
     parser.add_argument('-f', '--force', help='force start the target package', action='store_true', default=False, required=False)
+    parser.add_argument('--remote-host', type=str, help='remote Frida server host (e.g., 192.168.1.6)')
+    parser.add_argument('--remote-port', type=str, help='remote Frida server port (e.g., 65000)')
     args = parser.parse_args()
     try:
         setup_logging()
         stetho = Stheno()
-        stetho.run(args.target_name, args.force, args.address, args.port)
+        stetho.run(args.target_name, args.force, args.address, args.port, args.remote_host, args.remote_port)
     except KeyboardInterrupt:
         pass
 
