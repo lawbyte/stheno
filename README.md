@@ -36,6 +36,32 @@ Stheno can be used either as a standalone tool or in conjunction with [Medusa](h
    ```sh
    ./gradlew build
    ```
+
+3. **Run the Application:**
+   
+   **Option A: Using Gradle (Recommended)**
+   ```sh
+   ./gradlew run
+   ```
+   
+   **Option B: Using the JAR file**
+   ```sh
+   # Build the fat JAR with all dependencies
+   ./gradlew fatJar
+   
+   # Run the JAR (requires JavaFX to be installed)
+   java --module-path /usr/share/openjfx/lib --add-modules javafx.controls,javafx.fxml,javafx.web -jar build/libs/Intent-monitor-fat.jar
+   ```
+   
+   **Option C: Using custom runtime (includes JavaFX)**
+   ```sh
+   # Create custom runtime with JavaFX included
+   ./gradlew jlink
+   
+   # Run the custom runtime
+   ./build/image/bin/Stheno
+   ```
+
 ### Using with Medusa:
 
 If you are using Stheno with Medusa, only step 2 is necessary:
@@ -45,12 +71,61 @@ If you are using Stheno with Medusa, only step 2 is necessary:
    ```sh
    ./gradlew build
    ```
+
+2. **Run the Application:**
+   Use any of the methods described in step 3 above.
 ---
 
 ## Basic Usage:
 
 1. Run the python script defining the target app that you want to monitor (e.g. `python3 stheno.py -t com.foo.bar`)
-2. Run the monitor and got to menu->start to start monitoring the intents
+2. Run the monitor and go to menu->start to start monitoring the intents
+
+## Troubleshooting
+
+### JavaFX Issues
+If you encounter "JavaFX runtime components are missing" error:
+
+1. **Install JavaFX:**
+   ```sh
+   sudo apt update
+   sudo apt install openjfx libopenjfx-java
+   ```
+
+2. **Use the custom runtime (recommended):**
+   ```sh
+   ./gradlew jlink
+   ./build/image/bin/Stheno
+   ```
+
+### Module Resolution Issues
+If you encounter module resolution errors:
+
+1. **Use Gradle run (simplest):**
+   ```sh
+   ./gradlew run
+   ```
+
+2. **Or use the custom runtime:**
+   ```sh
+   ./gradlew jlink
+   ./build/image/bin/Stheno
+   ```
+
+### Build Issues
+If the build fails:
+
+1. **Clean and rebuild:**
+   ```sh
+   ./gradlew clean
+   ./gradlew build
+   ```
+
+2. **Check Java version:**
+   ```sh
+   java -version
+   ```
+   Ensure you're using Java 17 or higher.
 
 
 ## Contributing
